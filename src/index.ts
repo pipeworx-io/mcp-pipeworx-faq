@@ -1,11 +1,19 @@
 interface McpToolDefinition {
   name: string;
   description: string;
+  /** Human-facing one-liner (fleet #1967). Optional; consumers fall back to
+   *  description. Kept in step with shared/src/types.ts — scripts/lib/
+   *  check-inlined-types.mjs reports drift at publish time. */
+  summary?: string;
   inputSchema: {
     type: 'object';
     properties: Record<string, unknown>;
     required?: string[];
+    anyOf?: Array<{ required: string[] }>;
+    oneOf?: Array<{ required: string[] }>;
+    allOf?: Array<{ required: string[] }>;
   };
+  outputSchema?: Record<string, unknown>;
 }
 
 interface McpToolExport {
@@ -48,7 +56,7 @@ const FAQ: FaqEntry[] = [
     keywords: ['what is pipeworx', 'about pipeworx', 'pipeworx do', 'explain pipeworx', 'overview'],
     question: 'What is Pipeworx?',
     answer:
-      'Pipeworx is an open MCP gateway that connects AI agents to live data — thousands of tools across 1,300+ sources behind one endpoint. Instead of wiring up a separate MCP server per API, you connect once and ask; the router finds and runs the right tool, returning real data instead of guesses.',
+      'Pipeworx is an open MCP gateway that connects AI agents to live data — thousands of tools across 1,400+ sources behind one endpoint. Instead of wiring up a separate MCP server per API, you connect once and ask; the router finds and runs the right tool, returning real data instead of guesses.',
   },
   {
     id: 'what-is-mcp',
@@ -62,14 +70,14 @@ const FAQ: FaqEntry[] = [
     keywords: ['connect', 'install', 'setup', 'set up', 'add to claude', 'add to cursor', 'configure', 'get started', 'getting started', 'how do i use'],
     question: 'How do I connect?',
     answer:
-      'Add https://gateway.pipeworx.io/mcp as an MCP server in your client, or use the published plugins (Claude Code, Cursor, Windsurf, Gemini CLI, Perplexity — all on GitHub under pipeworx-io). The get_connection_config tool returns exact copy-paste config for your specific client.',
+      'Add https://gateway.pipeworx.io/oauth/mcp as an MCP server and sign in with GitHub — free, 200 tool calls/day. If you would rather not have an account, https://gateway.pipeworx.io/pipeworx-catalog/mcp works immediately at 50/day. Or use the published plugins (Claude Code, Cursor, Windsurf, Gemini CLI, Perplexity — all on GitHub under pipeworx-io). The get_connection_config tool returns exact copy-paste config for your specific client.',
   },
   {
     id: 'api-key',
     keywords: ['need a key', 'need an api key', 'require key', 'signup required', 'sign up required', 'account required', 'anonymous'],
     question: 'Do I need an API key?',
     answer:
-      'No. Anonymous use works immediately (50 requests/day). Sign in with GitHub, Google, or Microsoft for 2,000/day free. Bring your own vendor key for keyed sources, or upgrade for unlimited usage-based access.',
+      'No. Signing in is free and takes one GitHub click — it raises you from 50 to 200 tool calls/day, and you connect to https://gateway.pipeworx.io/oauth/mcp instead. Without an account, https://gateway.pipeworx.io/pipeworx-catalog/mcp works immediately at 50/day. Google and Microsoft sign-in also work. Bring your own vendor key for keyed sources, or upgrade for unlimited usage-based access.',
   },
   {
     id: 'pricing',
@@ -97,7 +105,7 @@ const FAQ: FaqEntry[] = [
     keywords: ['rate limit', 'limits', 'quota', 'requests per day', 'daily limit', 'throttl'],
     question: 'What are the rate limits?',
     answer:
-      'Anonymous: 50/day per IP. Bring-your-own-key: 300/day. Signed-in accounts: 2,000/day. Paid: unlimited. Limits reset daily.',
+      'Signed-in accounts: 200/day — free, one GitHub click, connect to https://gateway.pipeworx.io/oauth/mcp. Bring-your-own-key: 200/day. Anonymous: 50/day per IP, no account needed. Paid: unlimited. Limits reset at UTC midnight. The limit counts tool calls — keepalives and MCP discovery (initialize, tools/list) run on a separate budget and never spend it.',
   },
   {
     id: 'byo-key',
@@ -166,7 +174,14 @@ const FAQ: FaqEntry[] = [
     keywords: ['fresh', 'real-time', 'real time', 'how current', 'up to date', 'latency', 'delay'],
     question: 'How fresh is the data?',
     answer:
-      'Most tools are live pass-throughs to the source of record. Where an upstream has no usable API, we ingest and host the data ourselves on a monitored refresh cycle — and say so in the tool output.',
+      // The trailing clause used to promise the tool output said as much, which went false the moment the prose
+      // disclosures were scrubbed. It is now true of a different, structured field: provenance shipped 2026-08-25
+      // (14fbf7eb) and every response carries `source.observed` — true with the upstream URL on a pass-through,
+      // false on anything served from our side. Verified live 2026-09-01: fred_get_series true + api.stlouisfed.org
+      // URL, sec_8k_today false with no URL. Keep the sentence matched to what the field actually distinguishes.
+      // NOTE: this pragma must stay on the line directly above the string — the gate only looks one line back.
+      // hosting-claims-ok: DELIBERATE curated answer; conflicts with the standing rule — scrub-vs-keep is fleet #967
+      'Most tools are live pass-throughs to the source of record. Where an upstream has no usable API, we ingest and host the data ourselves on a monitored refresh cycle. Either way the response tells you which: `_meta.provenance` names the source authority and sets `observed` to whether we contacted it on this request.',
   },
   {
     id: 'why-not-direct',
@@ -282,25 +297,25 @@ function aboutPipeworx(args: Record<string, unknown>) {
 }
 
 const CLIENT_STEPS: Record<string, string> = {
-  'claude code': 'Run: claude mcp add pipeworx --transport http https://gateway.pipeworx.io/mcp — or install the plugin from github.com/pipeworx-io/claude-code-plugin.',
-  'claude.ai': 'Settings → Connectors → Add custom connector → https://gateway.pipeworx.io/mcp.',
-  cursor: 'Install the plugin from github.com/pipeworx-io/cursor-plugin, or add https://gateway.pipeworx.io/mcp as an MCP server in Cursor settings.',
+  'claude code': 'Run: claude mcp add pipeworx --transport http https://gateway.pipeworx.io/oauth/mcp — or install the plugin from github.com/pipeworx-io/claude-code-plugin.',
+  'claude.ai': 'Settings → Connectors → Add custom connector → https://gateway.pipeworx.io/oauth/mcp.',
+  cursor: 'Install the plugin from github.com/pipeworx-io/cursor-plugin, or add https://gateway.pipeworx.io/oauth/mcp as an MCP server in Cursor settings.',
   windsurf: 'Install from github.com/pipeworx-io/windsurf-plugin, or add the gateway URL as an MCP server in Windsurf settings.',
   gemini: 'Install the extension from github.com/pipeworx-io/gemini-cli-extension.',
   perplexity: 'Install from github.com/pipeworx-io/perplexity-plugin.',
-  chatgpt: 'Add https://gateway.pipeworx.io/mcp as a custom connector (Developer mode) in ChatGPT settings.',
+  chatgpt: 'Add https://gateway.pipeworx.io/oauth/mcp as a custom connector (Developer mode) in ChatGPT settings.',
 };
 
 function gettingStarted(args: Record<string, unknown>) {
   const raw = String(args.client ?? '').toLowerCase().trim();
   const key = Object.keys(CLIENT_STEPS).find((k) => raw.includes(k.split('.')[0].split(' ')[0]) && raw !== '') ?? (raw.includes('claude') ? 'claude code' : '');
   return {
-    gateway_url: 'https://gateway.pipeworx.io/mcp',
+    gateway_url: 'https://gateway.pipeworx.io/oauth/mcp',
     client: key || 'generic',
     steps: key
       ? CLIENT_STEPS[key]
-      : 'Add https://gateway.pipeworx.io/mcp as an MCP server (HTTP transport) in any MCP-capable client. Client-specific plugins: github.com/pipeworx-io.',
-    auth: 'Works anonymously out of the box (50 requests/day). Sign in at https://pipeworx.io/signup for 2,000/day free.',
+      : 'Add https://gateway.pipeworx.io/oauth/mcp as an MCP server (HTTP transport) in any MCP-capable client. Client-specific plugins: github.com/pipeworx-io.',
+    auth: 'Connect to https://gateway.pipeworx.io/oauth/mcp and sign in with GitHub for 200 tool calls/day, free. Without an account, https://gateway.pipeworx.io/pipeworx-catalog/mcp works out of the box at 50/day.',
     first_questions: [
       'ask_pipeworx({question: "AAPL revenue last quarter"})',
       'ask_pipeworx({question: "weather in Tokyo this week"})',
